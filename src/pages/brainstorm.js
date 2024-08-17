@@ -4,44 +4,46 @@ import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { callOpenAI } from "@/utils/openai";
-import { Lightbulb, Image, ArrowRightCircle, Trash2, Loader2 } from 'lucide-react';
+import { Lightbulb, Image, ArrowRightCircle, Trash2, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
 
 const BrainstormBoard = () => {
   const [ideas, setIdeas] = useState([]);
   const [newIdea, setNewIdea] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingIdeaId, setLoadingIdeaId] = useState(null);
+  const [zoom, setZoom] = useState(1);
   const boardRef = useRef(null);
 
   useEffect(() => {
-    ideas.forEach((idea) => {
-      const element = document.getElementById(`idea-${idea.id}`);
-      if (element) {
-        element.addEventListener('mousedown', startDragging);
+    const handleWheel = (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        setZoom(prevZoom => Math.min(Math.max(0.5, prevZoom - e.deltaY * 0.001), 2));
       }
-    });
+    };
+
+    const board = boardRef.current;
+    board.addEventListener('wheel', handleWheel, { passive: false });
 
     return () => {
-      ideas.forEach((idea) => {
-        const element = document.getElementById(`idea-${idea.id}`);
-        if (element) {
-          element.removeEventListener('mousedown', startDragging);
-        }
-      });
+      board.removeEventListener('wheel', handleWheel);
     };
-  }, [ideas]);
+  }, []);
 
-  const startDragging = (e) => {
+  const startDragging = (e, ideaId) => {
     const element = e.target.closest('.idea-card');
     if (!element) return;
 
+    const initialX = e.clientX - element.offsetLeft;
+    const initialY = e.clientY - element.offsetTop;
+
     const onMouseMove = (moveEvent) => {
-      const boardRect = boardRef.current.getBoundingClientRect();
-      const x = moveEvent.clientX - boardRect.left - element.offsetWidth / 2;
-      const y = moveEvent.clientY - boardRect.top - element.offsetHeight / 2;
+      const x = (moveEvent.clientX - initialX) / zoom;
+      const y = (moveEvent.clientY - initialY) / zoom;
       
-      element.style.left = `${x}px`;
-      element.style.top = `${y}px`;
+      setIdeas(prevIdeas => prevIdeas.map(idea => 
+        idea.id === ideaId ? { ...idea, x, y } : idea
+      ));
     };
 
     const onMouseUp = () => {
@@ -134,16 +136,28 @@ const BrainstormBoard = () => {
           Add Idea
         </Button>
       </div>
-      <div ref={boardRef} className="relative h-[800px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
+      <div className="mb-4 flex space-x-2">
+        <Button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))}>
+          <ZoomOut className="h-4 w-4 mr-2" /> Zoom Out
+        </Button>
+        <Button onClick={() => setZoom(prev => Math.min(2, prev + 0.1))}>
+          <ZoomIn className="h-4 w-4 mr-2" /> Zoom In
+        </Button>
+      </div>
+      <div 
+        ref={boardRef} 
+        className="relative h-[800px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50"
+        style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+      >
         {ideas.map((idea) => (
           <Card 
             key={idea.id} 
-            id={`idea-${idea.id}`}
             className="idea-card absolute cursor-move p-4 shadow-lg bg-white border-l-4 border-blue-500" 
             style={{ left: `${idea.x}px`, top: `${idea.y}px`, width: '300px' }}
+            onMouseDown={(e) => startDragging(e, idea.id)}
           >
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold text-gray-800">{idea.content}</CardTitle>
+              <CardTitle className="text-lg font-semibold text-gray-800 break-words">{idea.content}</CardTitle>
             </CardHeader>
             <CardContent className="py-2">
               {idea.imageUrl && <img src={idea.imageUrl} alt={idea.content} className="w-full h-auto mb-2 rounded" />}
