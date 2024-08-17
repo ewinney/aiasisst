@@ -70,12 +70,14 @@ export default function StickyNote({ id, content, position, imageUrl, onMove, ca
       onStop={handleDrag}
       bounds="parent"
       onMouseDown={() => dispatch({ type: 'BRING_TO_FRONT', payload: { id } })}
+      grid={[5, 5]} // Finer grid for smoother movement
+      defaultClassName="transition-transform duration-150 ease-in-out" // Smooth transition during drag
     >
       <div ref={noteRef} style={{ zIndex: zIndex || 'auto' }}>
         <ResizableBox
           width={size.width}
           height={size.height}
-          minConstraints={[100, 100]}
+          minConstraints={[150, 150]}
           maxConstraints={[400, 400]}
           onResize={handleResize}
           onResizeStart={() => setIsResizing(true)}
@@ -87,44 +89,48 @@ export default function StickyNote({ id, content, position, imageUrl, onMove, ca
             </div>
           }
         >
-          <Card className={`p-2 ${color} shadow-lg ${isResizing ? 'pointer-events-none' : ''}`}>
+          <Card className={`p-2 ${color} shadow-lg ${isResizing ? 'pointer-events-none' : ''} transition-shadow duration-200`}>
             <div className="handle cursor-move h-6 bg-gray-200 rounded-t mb-2" />
             <Textarea
               value={noteContent}
               onChange={handleContentChange}
-              className="w-full resize-none bg-transparent border-none focus:ring-0"
-              style={{ height: `${size.height - 70}px` }}
+              className="w-full resize-none bg-transparent border-none focus:ring-0 transition-all duration-200"
+              style={{ height: `${size.height - 100}px` }} // Adjusted height to accommodate button container
             />
-            <div className="absolute bottom-1 left-1 flex space-x-1">
-              {colors.map((c) => (
-                <div
-                  key={c}
-                  className={`w-4 h-4 rounded-full cursor-pointer ${c}`}
-                  onClick={() => handleColorChange(c)}
-                />
-              ))}
+            <div className="flex justify-between items-center mt-2">
+              <div className="flex space-x-1">
+                {colors.map((c) => (
+                  <div
+                    key={c}
+                    className={`w-4 h-4 rounded-full cursor-pointer ${c} hover:scale-110 transition-transform duration-150`}
+                    onClick={() => handleColorChange(c)}
+                  />
+                ))}
+              </div>
+              <div className="flex space-x-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowLinkInput(!showLinkInput)}
+                  className="hover:bg-opacity-20 transition-colors duration-150"
+                >
+                  <Link className="h-4 w-4" />
+                </Button>
+                {children}
+              </div>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="absolute bottom-1 right-1"
-              onClick={() => setShowLinkInput(!showLinkInput)}
-            >
-              <Link className="h-4 w-4" />
-            </Button>
             {showLinkInput && (
-              <div className="absolute bottom-8 right-1 bg-white p-2 rounded shadow">
+              <div className="mt-2 bg-white p-2 rounded shadow transition-all duration-200">
                 <Input
                   type="url"
                   placeholder="Enter URL"
                   value={linkUrl}
                   onChange={(e) => setLinkUrl(e.target.value)}
-                  className="mb-2"
+                  className="mb-2 transition-all duration-150"
                 />
-                <Button size="sm" onClick={handleAddLink}>Add Link</Button>
+                <Button size="sm" onClick={handleAddLink} className="hover:bg-opacity-90 transition-colors duration-150">Add Link</Button>
               </div>
             )}
-            {children}
           </Card>
         </ResizableBox>
       </div>
