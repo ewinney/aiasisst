@@ -1,221 +1,343 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { motion } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { callOpenAI } from "@/utils/openai";
 import { Lightbulb, Image, ArrowRightCircle, Trash2, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
+import StickyNote from '@/components/StickyNote';
+import Connector from '@/components/Connector';
+import Group from '@/components/Group';
+import { DndProvider } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 
 const BrainstormBoard = () => {
-  const [ideas, setIdeas] = useState([]);
-  const [newIdea, setNewIdea] = useState('');
+  const [notes, setNotes] = useState([]);
+  const [connectors, setConnectors] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isValidInput, setIsValidInput] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingIdeaId, setLoadingIdeaId] = useState(null);
-  const [zoom, setZoom] = useState(1);
-  const boardRef = useRef(null);
+  const [loadingNoteId, setLoadingNoteId] = useState(null);
+  const canvasRef = useRef(null);
 
   useEffect(() => {
-    const handleWheel = (e) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        setZoom(prevZoom => Math.min(Math.max(0.5, prevZoom - e.deltaY * 0.001), 2));
-      }
-    };
+    console.log('isLoading:', isLoading);
+  }, [isLoading]);
 
-    const board = boardRef.current;
-    board.addEventListener('wheel', handleWheel, { passive: false });
+  // Removed useEffect for logging current notes state
 
-    return () => {
-      board.removeEventListener('wheel', handleWheel);
-    };
+  // Removed useEffect for logging current state
+
+  const dispatch = useCallback((action) => {
+    switch (action.type) {
+      case 'ADD_NOTE':
+        setNotes(prevNotes => [...prevNotes, action.payload]);
+        break;
+      case 'UPDATE_NOTE':
+        setNotes(prevNotes => prevNotes.map(note =>
+          note.id === action.payload.id ? { ...note, ...action.payload } : note
+        ));
+        break;
+      case 'DELETE_NOTE':
+        setNotes(prevNotes => prevNotes.filter(note => note.id !== action.payload.id));
+        break;
+      case 'ADD_CONNECTOR':
+        setConnectors(prevConnectors => [...prevConnectors, action.payload]);
+        break;
+      case 'UPDATE_CONNECTOR':
+        setConnectors(prevConnectors => prevConnectors.map(connector =>
+          connector.id === action.payload.id ? { ...connector, ...action.payload } : connector
+        ));
+        break;
+      case 'DELETE_CONNECTOR':
+        setConnectors(prevConnectors => prevConnectors.filter(connector => connector.id !== action.payload.id));
+        break;
+      case 'ADD_GROUP':
+        setGroups(prevGroups => [...prevGroups, action.payload]);
+        break;
+      case 'UPDATE_GROUP':
+        setGroups(prevGroups => prevGroups.map(group =>
+          group.id === action.payload.id ? { ...group, ...action.payload } : group
+        ));
+        break;
+      case 'DELETE_GROUP':
+        setGroups(prevGroups => prevGroups.filter(group => group.id !== action.payload.id));
+        break;
+      case 'BRING_TO_FRONT':
+        setNotes(prevNotes => {
+          const noteToUpdate = prevNotes.find(note => note.id === action.payload.id);
+          const updatedNotes = prevNotes.filter(note => note.id !== action.payload.id);
+          return [...updatedNotes, { ...noteToUpdate, zIndex: Math.max(...prevNotes.map(n => n.zIndex || 0)) + 1 }];
+        });
+        break;
+      default:
+        console.error('Unknown action type:', action.type);
+    }
   }, []);
 
-  const startDragging = (e, ideaId) => {
-    const element = e.target.closest('.idea-card');
-    if (!element) return;
-
-    const initialX = e.clientX - element.offsetLeft;
-    const initialY = e.clientY - element.offsetTop;
-
-    const onMouseMove = (moveEvent) => {
-      const x = (moveEvent.clientX - initialX) / zoom;
-      const y = (moveEvent.clientY - initialY) / zoom;
-      
-      setIdeas(prevIdeas => prevIdeas.map(idea => 
-        idea.id === ideaId ? { ...idea, x, y } : idea
-      ));
-    };
-
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  };
-
-  const addIdea = async (content) => {
-    const newId = Date.now();
-    const newIdeaObj = { id: newId, content, x: 50, y: 50 };
-    setIdeas([...ideas, newIdeaObj]);
-    setNewIdea('');
-  };
-
-  const generateImage = async (ideaId) => {
-    setLoadingIdeaId(ideaId);
+  const addIdea = async () => {
+    console.log('Adding idea:', inputValue, 'isLoading:', isLoading, 'isValidInput:', isValidInput); // Enhanced debug log
+    if (!inputValue.trim() || isLoading) {
+      console.log('Aborting addIdea: Empty input or already loading');
+      return;
+    }
+    setIsLoading(true);
     try {
-      const idea = ideas.find(i => i.id === ideaId);
-      const imagePrompt = `Generate an image that represents the following idea: ${idea.content}`;
+      const newId = Date.now();
+      const newNote = {
+        id: newId,
+        content: inputValue.trim(),
+        position: { x: Math.random() * 500, y: Math.random() * 300 },
+        type: 'note',
+        zIndex: notes.length
+      };
+
+      console.log('Created new note object:', newNote); // Debug log
+
+      await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API call
+
+      dispatch({
+        type: 'ADD_NOTE',
+        payload: newNote
+      });
+
+      console.log('New note added to state:', newNote); // Debug log
+
+      // Reset input state after successfully adding the idea
+      setInputValue('');
+      setIsValidInput(false);
+      console.log('Input state reset. New inputValue:', '', 'New isValidInput:', false); // Debug log
+    } catch (error) {
+      console.error('Error adding new idea:', error);
+      alert('Failed to add new idea. Please try again.');
+    } finally {
+      setIsLoading(false);
+      console.log('Loading state reset. New isLoading:', false); // Debug log
+    }
+  };
+
+  const generateImage = async (noteId) => {
+    setLoadingNoteId(noteId);
+    try {
+      const note = notes.find(n => n.id === noteId);
+      const imagePrompt = `Generate an image that represents the following idea: ${note.content}`;
       const imageUrl = await callOpenAI(imagePrompt, 'image');
-      setIdeas(ideas.map(i => 
-        i.id === ideaId ? { ...i, imageUrl } : i
-      ));
+      dispatch({ type: 'UPDATE_NOTE', payload: { id: noteId, imageUrl } });
     } catch (error) {
       console.error("Error generating image:", error);
       alert(`Failed to generate image: ${error.message}`);
     } finally {
-      setLoadingIdeaId(null);
+      setLoadingNoteId(null);
     }
   };
 
-  const expandIdea = async (ideaId) => {
-    setLoadingIdeaId(ideaId);
+  const expandIdea = async (noteId) => {
+    setLoadingNoteId(noteId);
     try {
-      const idea = ideas.find(i => i.id === ideaId);
-      const prompt = `Expand on this idea: ${idea.content}. Provide 3 related concepts or details.`;
+      const note = notes.find(n => n.id === noteId);
+      const prompt = `Expand on this idea: ${note.content}. Provide 3 related concepts or details.`;
       const expansion = await callOpenAI(prompt);
       const expandedIdeas = expansion.split('\n').filter(i => i.trim());
-      const newIdeas = expandedIdeas.map((content, index) => ({
-        id: Date.now() + index,
-        content,
-        x: idea.x + 250,
-        y: idea.y + (index * 150)
-      }));
-      setIdeas([...ideas, ...newIdeas]);
+      expandedIdeas.forEach((content, index) => {
+        dispatch({
+          type: 'ADD_NOTE',
+          payload: {
+            id: Date.now() + index,
+            content,
+            position: { x: note.position.x + 250, y: note.position.y + (index * 150) },
+            type: 'note'
+          }
+        });
+      });
     } catch (error) {
       console.error("Error expanding idea:", error);
       alert(`Failed to expand idea: ${error.message}`);
     } finally {
-      setLoadingIdeaId(null);
+      setLoadingNoteId(null);
     }
   };
 
-  const improveIdea = async (ideaId) => {
-    setLoadingIdeaId(ideaId);
+  const improveIdea = async (noteId) => {
+    setLoadingNoteId(noteId);
     try {
-      const idea = ideas.find(i => i.id === ideaId);
-      const prompt = `Improve and refine this idea: ${idea.content}. Make it more specific and actionable.`;
+      const note = notes.find(n => n.id === noteId);
+      const prompt = `Improve and refine this idea: ${note.content}. Make it more specific and actionable.`;
       const improvedIdea = await callOpenAI(prompt);
-      setIdeas(ideas.map(i => 
-        i.id === ideaId ? { ...i, content: improvedIdea } : i
-      ));
+      dispatch({ type: 'UPDATE_NOTE', payload: { id: noteId, content: improvedIdea } });
     } catch (error) {
       console.error("Error improving idea:", error);
       alert(`Failed to improve idea: ${error.message}`);
     } finally {
-      setLoadingIdeaId(null);
+      setLoadingNoteId(null);
     }
   };
 
-  const deleteIdea = (ideaId) => {
-    setIdeas(ideas.filter(idea => idea.id !== ideaId));
+  const deleteIdea = (noteId) => {
+    dispatch({ type: 'DELETE_NOTE', payload: { id: noteId } });
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-3xl font-bold mb-6">AI Brainstorm Board</h1>
-      <div className="mb-4 flex space-x-2">
-        <Input
-          value={newIdea}
-          onChange={(e) => setNewIdea(e.target.value)}
-          placeholder="Enter a new idea..."
-          className="flex-grow"
-        />
-        <Button onClick={() => addIdea(newIdea)} disabled={!newIdea.trim() || isLoading}>
-          Add Idea
-        </Button>
-      </div>
-      <div className="mb-4 flex space-x-2">
-        <Button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.1))}>
-          <ZoomOut className="h-4 w-4 mr-2" /> Zoom Out
-        </Button>
-        <Button onClick={() => setZoom(prev => Math.min(2, prev + 0.1))}>
-          <ZoomIn className="h-4 w-4 mr-2" /> Zoom In
-        </Button>
-      </div>
-      <div 
-        ref={boardRef} 
-        className="relative h-[800px] border border-gray-300 rounded-lg overflow-hidden bg-gray-50"
-        style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
-      >
-        {ideas.map((idea) => (
-          <Card 
-            key={idea.id} 
-            className="idea-card absolute cursor-move p-4 shadow-lg bg-white border-l-4 border-blue-500" 
-            style={{ left: `${idea.x}px`, top: `${idea.y}px`, width: '300px' }}
-            onMouseDown={(e) => startDragging(e, idea.id)}
+    <DndProvider backend={HTML5Backend}>
+      <div className="container mx-auto p-4">
+        <h1 className="text-3xl font-bold mb-6">AI Brainstorm Board</h1>
+        <div className="mb-4 flex space-x-2">
+          <Input
+            value={inputValue}
+            onChange={(e) => {
+              const value = e.target.value;
+              setInputValue(value);
+              const isValid = value.trim().length > 0;
+              setIsValidInput(isValid);
+              console.log('Input changed:', value, 'isValid:', isValid); // Debug log
+            }}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && isValidInput && !isLoading) {
+                e.preventDefault(); // Prevent form submission
+                addIdea();
+              }
+            }}
+            placeholder="Enter a new idea..."
+            className="flex-grow"
+          />
+          <Button
+            onClick={addIdea}
+            disabled={!isValidInput || isLoading}
           >
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-semibold text-gray-800 break-words">{idea.content}</CardTitle>
-            </CardHeader>
-            <CardContent className="py-2">
-              {idea.imageUrl && <img src={idea.imageUrl} alt={idea.content} className="w-full h-auto mb-2 rounded" />}
-            </CardContent>
-            <CardFooter className="flex justify-between pt-2">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button size="sm" variant="outline" onClick={() => improveIdea(idea.id)} disabled={loadingIdeaId === idea.id}>
-                      {loadingIdeaId === idea.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Improve Idea</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button size="sm" variant="outline" onClick={() => generateImage(idea.id)} disabled={loadingIdeaId === idea.id}>
-                      {loadingIdeaId === idea.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4" />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Generate Image</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button size="sm" variant="outline" onClick={() => expandIdea(idea.id)} disabled={loadingIdeaId === idea.id}>
-                      {loadingIdeaId === idea.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Expand Idea</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button size="sm" variant="outline" onClick={() => deleteIdea(idea.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Delete Idea</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </CardFooter>
-          </Card>
-        ))}
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Add Idea
+          </Button>
+        </div>
+        <div className="mb-2">
+          <p>Debug Info: Input: {inputValue}, IsValid: {isValidInput.toString()}, IsLoading: {isLoading.toString()}</p>
+        </div>
+        <TransformWrapper
+          initialScale={1}
+          initialPositionX={0}
+          initialPositionY={0}
+        >
+          {({ zoomIn, zoomOut, resetTransform }) => (
+            <>
+              <div className="absolute top-4 left-4 z-10 flex space-x-2">
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => zoomIn()}
+                  className="bg-white dark:bg-gray-800 p-2 rounded-full shadow-md"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => zoomOut()}
+                  className="bg-white dark:bg-gray-800 p-2 rounded-full shadow-md"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => resetTransform()}
+                  className="bg-white dark:bg-gray-800 p-2 rounded-full shadow-md"
+                >
+                  Reset
+                </motion.button>
+              </div>
+              <TransformComponent>
+                <div ref={canvasRef} className="relative w-[3000px] h-[2000px] bg-white dark:bg-gray-900">
+                  {groups.map(group => (
+                    <Group
+                      key={group.id}
+                      id={group.id}
+                      name={group.name}
+                      noteIds={group.noteIds}
+                      notes={notes}
+                      dispatch={dispatch}
+                    />
+                  ))}
+                  {connectors.map(connector => (
+                    <Connector
+                      key={connector.id}
+                      id={connector.id}
+                      start={notes.find(n => n.id === connector.startId)?.position}
+                      end={notes.find(n => n.id === connector.endId)?.position}
+                      style={connector.style}
+                      label={connector.label}
+                      onUpdate={(updatedConnector) => dispatch({ type: 'UPDATE_CONNECTOR', payload: updatedConnector })}
+                    />
+                  ))}
+                  {notes.map(note => (
+                    <StickyNote
+                      key={note.id}
+                      id={note.id}
+                      content={note.content}
+                      position={note.position}
+                      imageUrl={note.imageUrl}
+                      onMove={(id, position) => dispatch({ type: 'UPDATE_NOTE', payload: { id, position } })}
+                      dispatch={dispatch}
+                    >
+                      <div className="flex justify-between pt-2">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="outline" onClick={() => improveIdea(note.id)} disabled={loadingNoteId === note.id}>
+                                {loadingNoteId === note.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Improve Idea</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="outline" onClick={() => generateImage(note.id)} disabled={loadingNoteId === note.id}>
+                                {loadingNoteId === note.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Image className="h-4 w-4" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Generate Image</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="outline" onClick={() => expandIdea(note.id)} disabled={loadingNoteId === note.id}>
+                                {loadingNoteId === note.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Expand Idea</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button size="sm" variant="outline" onClick={() => deleteIdea(note.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Delete Idea</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    </StickyNote>
+                  ))}
+                </div>
+              </TransformComponent>
+            </>
+          )}
+        </TransformWrapper>
       </div>
-    </div>
+    </DndProvider>
   );
 };
 
